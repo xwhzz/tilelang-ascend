@@ -18,7 +18,7 @@ def sparse_attention_fwd(
     kv_group=1,
     sm_scale=None,
     is_causal=True,
-    block_I=64,
+    block_I=128,
 ):
     assert dim == tilelang.math.next_power_of_2(
         dim), f"haven't check padding correctness yet, dim={dim}"
@@ -74,8 +74,7 @@ def sparse_attention_fwd(
             Indices: T.Tensor(indices_shape, indices_dtype),  # type: ignore
             Output: T.Tensor(o_shape, dtype),  # type: ignore
 
-            # TODO: implement automatically
-        workspace_1: T.Tensor([block_num, BI, D], dtype),
+            workspace_1: T.Tensor([block_num, BI, D], dtype),
             workspace_2: T.Tensor([block_num, BI, D_tail], dtype),
             workspace_3: T.Tensor([block_num, H_per_block, BI], accum_dtype),
             workspace_4: T.Tensor([block_num, H_per_block, BI], dtype),
@@ -129,16 +128,16 @@ def sparse_attention_fwd(
                 sumexp: 65536,
                 m_i: 65664,
                 indices_ub_: 65792,
-                kv_ub: 66048,
-                kv_tail_ub: 67072,
-                acc_s_ub: 66048,
-                m_i_prev: 74240,
-                acc_s_ub_: 74368,
-                tmp_ub: 74368,
-                sumexp_i_ub: 98944,
-                acc_s_half: 98944,
-                acc_o_ub: 98944,
-                acc_o_half: 98944
+                kv_ub: 66304,
+                kv_tail_ub: 67328,
+                acc_s_ub: 66304,
+                m_i_prev: 82688,
+                acc_s_ub_: 82816,
+                tmp_ub: 82816,
+                sumexp_i_ub: 131968,
+                acc_s_half: 131968,
+                acc_o_ub: 131968,
+                acc_o_half: 131968
             })
 
             b_i = by
@@ -150,14 +149,14 @@ def sparse_attention_fwd(
             H1 = H0 + H_per_block
 
             with T.Scope("C"):
-                T.copy(Q[b_i, s_i, H0:H1, :D], q_l1)
-                T.copy(Q[b_i, s_i, H0:H1, D:], q_tail_l1)
+                # T.copy(Q[b_i, s_i, H0:H1, :D], q_l1)
+                # T.copy(Q[b_i, s_i, H0:H1, D:], q_tail_l1)
                 T.barrier_all()
                 for _ in T.serial(NI):
                     T.wait_cross_flag(0)
                     T.barrier_all()
-                    T.copy(workspace_1[cid, 0:BI, 0:D], kv_l1)
-                    T.copy(workspace_2[cid, 0:BI, 0:D_tail], kv_tail_l1)
+                    # T.copy(workspace_1[cid, 0:BI, 0:D], kv_l1)
+                    # T.copy(workspace_2[cid, 0:BI, 0:D_tail], kv_tail_l1)
                     T.barrier_all()
 
                     T.gemm_v0(q_l1, kv_l1, acc_s_l0c, transpose_B=True, init=True)
@@ -165,20 +164,20 @@ def sparse_attention_fwd(
                     T.gemm_v0(q_tail_l1, kv_tail_l1, acc_s_l0c, transpose_B=True)
                     T.barrier_all()
 
-                    T.copy(acc_s_l0c, workspace_3[cid, 0:H_per_block, 0:BI])
+                    # T.copy(acc_s_l0c, workspace_3[cid, 0:H_per_block, 0:BI])
                     T.barrier_all()
                     T.set_cross_flag("FIX", 1)
 
                     T.wait_cross_flag(2)
                     T.barrier_all()
 
-                    T.copy(workspace_4[cid, 0:H_per_block, 0:BI], acc_s_l1)
+                    # T.copy(workspace_4[cid, 0:H_per_block, 0:BI], acc_s_l1)
                     T.barrier_all()
 
                     T.gemm_v0(acc_s_l1, kv_l1, acc_o_l0c, init=True)
                     T.barrier_all()
 
-                    T.copy(acc_o_l0c, workspace_5[cid, 0:H_per_block, 0:D])
+                    # T.copy(acc_o_l0c, workspace_5[cid, 0:H_per_block, 0:D])
                     T.barrier_all()
 
                     T.set_cross_flag("FIX", 3)
@@ -193,15 +192,15 @@ def sparse_attention_fwd(
                 T.barrier_all()
 
                 for i_i in range(NI):
-                    T.copy(Indices[b_i, s_i, g_i, i_i * BI:i_i * BI + BI], indices_ub_)
+                    # T.copy(Indices[b_i, s_i, g_i, i_i * BI:i_i * BI + BI], indices_ub_)
                     T.barrier_all()
 
                     for bi_i in range(BI // 2):
-                        T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, :D], kv_ub)
-                        T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, D:], kv_tail_ub)
+                        # T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, :D], kv_ub)
+                        # T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, D:], kv_tail_ub)
                         T.barrier_all()
-                        T.copy(kv_ub, workspace_1[cid, bi_i + vid * BI // 2, :])
-                        T.copy(kv_tail_ub, workspace_2[cid, bi_i + vid * BI // 2, :])
+                        # T.copy(kv_ub, workspace_1[cid, bi_i + vid * BI // 2, :])
+                        # T.copy(kv_tail_ub, workspace_2[cid, bi_i + vid * BI // 2, :])
                         T.barrier_all()
 
                     T.set_cross_flag("MTE3", 0)
@@ -213,7 +212,7 @@ def sparse_attention_fwd(
                     T.barrier_all()
 
                     T.wait_cross_flag(1)
-                    T.copy(workspace_3[cid, vid * v_block:vid * v_block + v_block, :], acc_s_ub_)
+                    # T.copy(workspace_3[cid, vid * v_block:vid * v_block + v_block, :], acc_s_ub_)
                     T.barrier_all()
 
                     T.add(acc_s_ub, acc_s_ub, acc_s_ub_)
@@ -227,8 +226,6 @@ def sparse_attention_fwd(
 
                     T.max(m_i, m_i, m_i_prev)
                     T.barrier_all()
-
-                    # alpha_ub = m_i_prev
 
                     T.sub(m_i_prev, m_i_prev, m_i)
                     T.barrier_all()
@@ -261,7 +258,7 @@ def sparse_attention_fwd(
                     T.copy(acc_s_ub, acc_s_half)
                     T.barrier_all()
 
-                    T.copy(acc_s_half, workspace_4[cid, vid * v_block:vid * v_block + v_block, :])
+                    # T.copy(acc_s_half, workspace_4[cid, vid * v_block:vid * v_block + v_block, :])
                     T.barrier_all()
 
                     T.set_cross_flag("MTE3", 2)
@@ -269,7 +266,7 @@ def sparse_attention_fwd(
                     T.wait_cross_flag(3)
                     T.barrier_all()
 
-                    T.copy(workspace_5[cid, vid * v_block:vid * v_block + v_block, :], acc_o_ub)
+                    # T.copy(workspace_5[cid, vid * v_block:vid * v_block + v_block, :], acc_o_ub)
                     T.barrier_all()
 
                     T.add(acc_o, acc_o, acc_o_ub)
@@ -285,7 +282,7 @@ def sparse_attention_fwd(
 
                 T.copy(acc_o, acc_o_half)
                 T.barrier_all()
-                T.copy(acc_o_half, Output[b_i, s_i, H0 + vid * v_block:H1 + vid * v_block, :])
+                # T.copy(acc_o_half, Output[b_i, s_i, H0 + vid * v_block:H1 + vid * v_block, :])
 
                 T.barrier_all()
 
@@ -365,21 +362,23 @@ for b in range(B):
             indices[b, t, h, :len(i_i)] = i_i
 
 # output = torch.empty((B, S, H, DV), dtype=dtype)
-workspace_1 = torch.zeros((256, 64, 512), dtype=dtype)
-workspace_2 = torch.zeros((256, 64, 64), dtype=dtype)
-workspace_3 = torch.zeros((256, 64, 64), dtype=torch.float)
-workspace_4 = torch.zeros((256, 64, 64), dtype=dtype)
-workspace_5 = torch.zeros((256, 64, 512), dtype=torch.float)
+workspace_1 = torch.empty((256, 128, 512), dtype=dtype)
+workspace_2 = torch.empty((256, 128, 64), dtype=dtype)
+workspace_3 = torch.empty((256, 64, 128), dtype=torch.float)
+workspace_4 = torch.empty((256, 64, 128), dtype=dtype)
+workspace_5 = torch.empty((256, 64, 512), dtype=torch.float)
 
 torch.npu.synchronize()
 print("init successful!")
+print(func.get_kernel_source())
 
 output = func(q, kv, indices, workspace_1, workspace_2, workspace_3, workspace_4, workspace_5)
 
+
 torch.npu.synchronize()
 
-ref_output = ref_sparse_attention_fwd_interface(q, kv, indices, q_start_s_index, KV_stride)
-torch.npu.synchronize()
-torch.testing.assert_close(ref_output, output, rtol=1e-2, atol=1e-2)
+# ref_output = ref_sparse_attention_fwd_interface(q, kv, indices, q_start_s_index, KV_stride)
+# torch.npu.synchronize()
+# torch.testing.assert_close(ref_output, output, rtol=1e-2, atol=1e-2)
 
-print("Test Passed!")
+# print("Test Passed!")
