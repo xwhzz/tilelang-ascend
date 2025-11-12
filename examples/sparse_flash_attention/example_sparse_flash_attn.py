@@ -135,9 +135,9 @@ def sparse_attention_fwd(
                 acc_s_ub_: 82816,
                 tmp_ub: 82816,
                 sumexp_i_ub: 131968,
-                acc_s_half: 131968,
-                acc_o_ub: 131968,
-                acc_o_half: 131968
+                acc_s_half: 82816,
+                acc_o_ub: 82816,
+                acc_o_half: 82816
             })
 
             b_i = by
