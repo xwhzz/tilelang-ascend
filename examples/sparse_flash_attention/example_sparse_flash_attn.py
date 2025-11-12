@@ -136,8 +136,8 @@ def sparse_attention_fwd(
                 tmp_ub: 82816,
                 sumexp_i_ub: 131968,
                 acc_s_half: 82816,
-                acc_o_ub: 82816,
-                acc_o_half: 82816
+                acc_o_ub: 65792,
+                acc_o_half: 65792
             })
 
             b_i = by
@@ -149,14 +149,14 @@ def sparse_attention_fwd(
             H1 = H0 + H_per_block
 
             with T.Scope("C"):
-                # T.copy(Q[b_i, s_i, H0:H1, :D], q_l1)
-                # T.copy(Q[b_i, s_i, H0:H1, D:], q_tail_l1)
+                T.copy(Q[b_i, s_i, H0:H1, :D], q_l1)
+                T.copy(Q[b_i, s_i, H0:H1, D:], q_tail_l1)
                 T.barrier_all()
                 for _ in T.serial(NI):
                     T.wait_cross_flag(0)
                     T.barrier_all()
-                    # T.copy(workspace_1[cid, 0:BI, 0:D], kv_l1)
-                    # T.copy(workspace_2[cid, 0:BI, 0:D_tail], kv_tail_l1)
+                    T.copy(workspace_1[cid, 0:BI, 0:D], kv_l1)
+                    T.copy(workspace_2[cid, 0:BI, 0:D_tail], kv_tail_l1)
                     T.barrier_all()
 
                     T.gemm_v0(q_l1, kv_l1, acc_s_l0c, transpose_B=True, init=True)
@@ -164,25 +164,24 @@ def sparse_attention_fwd(
                     T.gemm_v0(q_tail_l1, kv_tail_l1, acc_s_l0c, transpose_B=True)
                     T.barrier_all()
 
-                    # T.copy(acc_s_l0c, workspace_3[cid, 0:H_per_block, 0:BI])
+                    T.copy(acc_s_l0c, workspace_3[cid, 0:H_per_block, 0:BI])
                     T.barrier_all()
                     T.set_cross_flag("FIX", 1)
 
                     T.wait_cross_flag(2)
                     T.barrier_all()
 
-                    # T.copy(workspace_4[cid, 0:H_per_block, 0:BI], acc_s_l1)
+                    T.copy(workspace_4[cid, 0:H_per_block, 0:BI], acc_s_l1)
                     T.barrier_all()
 
                     T.gemm_v0(acc_s_l1, kv_l1, acc_o_l0c, init=True)
                     T.barrier_all()
 
-                    # T.copy(acc_o_l0c, workspace_5[cid, 0:H_per_block, 0:D])
+                    T.copy(acc_o_l0c, workspace_5[cid, 0:H_per_block, 0:D])
                     T.barrier_all()
 
                     T.set_cross_flag("FIX", 3)
                     T.wait_cross_flag(4)
-                T.wait_cross_flag(8)
 
             with T.Scope("V"):
 
@@ -192,15 +191,15 @@ def sparse_attention_fwd(
                 T.barrier_all()
 
                 for i_i in range(NI):
-                    # T.copy(Indices[b_i, s_i, g_i, i_i * BI:i_i * BI + BI], indices_ub_)
+                    T.copy(Indices[b_i, s_i, g_i, i_i * BI:i_i * BI + BI], indices_ub_)
                     T.barrier_all()
 
                     for bi_i in range(BI // 2):
-                        # T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, :D], kv_ub)
-                        # T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, D:], kv_tail_ub)
+                        T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, :D], kv_ub)
+                        T.copy(KV[b_i, indices_ub_[bi_i + vid * BI // 2], g_i, D:], kv_tail_ub)
                         T.barrier_all()
-                        # T.copy(kv_ub, workspace_1[cid, bi_i + vid * BI // 2, :])
-                        # T.copy(kv_tail_ub, workspace_2[cid, bi_i + vid * BI // 2, :])
+                        T.copy(kv_ub, workspace_1[cid, bi_i + vid * BI // 2, :])
+                        T.copy(kv_tail_ub, workspace_2[cid, bi_i + vid * BI // 2, :])
                         T.barrier_all()
 
                     T.set_cross_flag("MTE3", 0)
@@ -212,7 +211,7 @@ def sparse_attention_fwd(
                     T.barrier_all()
 
                     T.wait_cross_flag(1)
-                    # T.copy(workspace_3[cid, vid * v_block:vid * v_block + v_block, :], acc_s_ub_)
+                    T.copy(workspace_3[cid, vid * v_block:vid * v_block + v_block, :], acc_s_ub_)
                     T.barrier_all()
 
                     T.add(acc_s_ub, acc_s_ub, acc_s_ub_)
@@ -258,7 +257,7 @@ def sparse_attention_fwd(
                     T.copy(acc_s_ub, acc_s_half)
                     T.barrier_all()
 
-                    # T.copy(acc_s_half, workspace_4[cid, vid * v_block:vid * v_block + v_block, :])
+                    T.copy(acc_s_half, workspace_4[cid, vid * v_block:vid * v_block + v_block, :])
                     T.barrier_all()
 
                     T.set_cross_flag("MTE3", 2)
@@ -266,7 +265,7 @@ def sparse_attention_fwd(
                     T.wait_cross_flag(3)
                     T.barrier_all()
 
-                    # T.copy(workspace_5[cid, vid * v_block:vid * v_block + v_block, :], acc_o_ub)
+                    T.copy(workspace_5[cid, vid * v_block:vid * v_block + v_block, :], acc_o_ub)
                     T.barrier_all()
 
                     T.add(acc_o, acc_o, acc_o_ub)
@@ -282,11 +281,7 @@ def sparse_attention_fwd(
 
                 T.copy(acc_o, acc_o_half)
                 T.barrier_all()
-                # T.copy(acc_o_half, Output[b_i, s_i, H0 + vid * v_block:H1 + vid * v_block, :])
-
-                T.barrier_all()
-
-                T.set_cross_flag("MTE3", 8)
+                T.copy(acc_o_half, Output[b_i, s_i, H0 + vid * v_block:H1 + vid * v_block, :])
 
     return main
 
