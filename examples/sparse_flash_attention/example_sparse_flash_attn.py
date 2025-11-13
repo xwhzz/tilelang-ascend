@@ -159,13 +159,14 @@ def sparse_attention_fwd(
                     T.copy(workspace_2[cid, 0:BI, 0:D_tail], kv_tail_l1)
                     T.barrier_all()
 
-                    T.gemm_v0(q_l1, kv_l1, acc_s_l0c, transpose_B=True, init=True)
-                    T.barrier_all()
+                    T.gemm_v0(q_l1, kv_l1[:64, :], acc_s_l0c[:, :64], transpose_B=True, init=True)
+                    # TODO: need to fix, This is just a mock
+                    T.gemm_v0(q_l1, kv_l1[:64, :], acc_s_l0c[:, :64], transpose_B=True, init=True)
+
                     T.gemm_v0(q_tail_l1, kv_tail_l1, acc_s_l0c, transpose_B=True)
                     T.barrier_all()
 
                     T.copy(acc_s_l0c, workspace_3[cid, 0:H_per_block, 0:BI])
-                    T.barrier_all()
                     T.set_cross_flag("FIX", 1)
 
                     T.wait_cross_flag(2)
@@ -174,7 +175,8 @@ def sparse_attention_fwd(
                     T.copy(workspace_4[cid, 0:H_per_block, 0:BI], acc_s_l1)
                     T.barrier_all()
 
-                    T.gemm_v0(acc_s_l1, kv_l1, acc_o_l0c, init=True)
+                    T.gemm_v0(acc_s_l1[:, :64], kv_l1[:64, :], acc_o_l0c, init=True)
+                    T.gemm_v0(acc_s_l1[:, 64:], kv_l1[64:, :], acc_o_l0c)
                     T.barrier_all()
 
                     T.copy(acc_o_l0c, workspace_5[cid, 0:H_per_block, 0:D])
