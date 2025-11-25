@@ -9,6 +9,8 @@ tilelang.disable_cache()
 
 stages = 2
 
+B, S, H, D = 1, 4096, 1, 512
+
 @tilelang.jit(out_idx=[3],)
 def flash_attention_fwd(
     heads,
@@ -16,8 +18,8 @@ def flash_attention_fwd(
 ):
     block_M, block_N = 64, 64
 
-    batch = 1
-    seq_len = 128
+    batch = B
+    seq_len = S
 
     dtype = "float16"
     accum_dtype = "float"
@@ -58,6 +60,7 @@ def flash_attention_fwd(
 
             acc_s_ub = T.alloc_ub([block_M // 2, block_N], accum_dtype)
             m_i_prev = T.alloc_ub([block_M // 2], accum_dtype)
+            m_i_prev_1 = T.alloc_ub([block_M // 2], accum_dtype)
             acc_s_ub_ = T.alloc_ub([block_M // 2, block_N], accum_dtype)
             tmp_ub = T.alloc_ub([3 * DataType(accum_dtype).bits // 8 * block_M // 2 * block_N],
                                 "uint8")
@@ -83,12 +86,13 @@ def flash_attention_fwd(
                 m_i: 65664,
                 acc_s_ub: 66048,
                 m_i_prev: 74240,
-                acc_s_ub_: 74368,
-                tmp_ub: 74368,
-                sumexp_i_ub: 98944,
-                acc_s_half: 98944,
-                acc_o_ub: 98944,
-                acc_o_half: 98944
+                m_i_prev_1: 74368,
+                acc_s_ub_: 74368 + (stages - 1) * block_M * 2,
+                tmp_ub: 74368 + (stages - 1) * block_M * 2,
+                sumexp_i_ub: 98944 + (stages - 1) * block_M * 2,
+                acc_s_half: 98944 + (stages - 1) * block_M * 2,
+                acc_o_ub: 98944 + (stages - 1) * block_M * 2,
+                acc_o_half: 98944 + (stages - 1) * block_M * 2
             })
 
             
@@ -129,6 +133,9 @@ def flash_attention_fwd(
                         T.copy(acc_o_l0c, workspace_3[cid, i, :, :])
                         T.barrier_all()
                         T.set_cross_flag("FIX", i + stages * 5)
+                for i in range(stages):
+                    T.wait_cross_flag(i)
+                    T.wait_cross_flag((i + stages * 4))
 
             with T.Scope("V"):
                 for i in range(stages):
@@ -143,8 +150,10 @@ def flash_attention_fwd(
                     for i in range(stages):
                         T.fill(acc_s_ub, 0.0)
                         T.barrier_all()
-
-                        T.copy(m_i, m_i_prev)
+                        if i == 0:
+                            T.copy(m_i, m_i_prev)
+                        else:
+                            T.copy(m_i, m_i_prev_1)
                         T.barrier_all()
 
                         T.wait_cross_flag(i + stages)
@@ -162,18 +171,25 @@ def flash_attention_fwd(
 
                         T.reduce_max(m_i, acc_s_ub, tmp_ub, dim=-1)
                         T.barrier_all()
-
-                        T.max(m_i, m_i, m_i_prev)
+                        if i == 0:
+                            T.max(m_i, m_i, m_i_prev)
+                        else:
+                            T.max(m_i, m_i, m_i_prev_1)
                         T.barrier_all()
+                        if i == 0:
+                            T.sub(m_i_prev, m_i_prev, m_i)
+                            T.barrier_all()
 
-                        T.sub(m_i_prev, m_i_prev, m_i)
-                        T.barrier_all()
+                            T.exp(m_i_prev, m_i_prev)
+                            T.barrier_all()
+                        else:
+                            T.sub(m_i_prev_1, m_i_prev_1, m_i)
+                            T.barrier_all()
 
-                        T.exp(m_i_prev, m_i_prev)
-                        T.barrier_all()
+                            T.exp(m_i_prev_1, m_i_prev_1)
+                            T.barrier_all()                            
 
                         for h_i in range(block_M // 2):
-                            T.barrier_all()
                             T.sub(acc_s_ub[h_i, :], acc_s_ub[h_i, :], m_i[h_i])  # -
                             T.barrier_all()
 
@@ -182,17 +198,18 @@ def flash_attention_fwd(
 
                         T.reduce_sum(sumexp_i_ub, acc_s_ub, tmp_ub, dim=-1)
                         T.barrier_all()
-
-                        T.mul(sumexp, sumexp, m_i_prev)  # check
+                        if i == 0:
+                            T.mul(sumexp, sumexp, m_i_prev)
+                        else:
+                            T.mul(sumexp, sumexp, m_i_prev_1)
                         T.barrier_all()
 
                         T.add(sumexp, sumexp, sumexp_i_ub)
                         T.barrier_all()
 
-                        for h_i in range(block_M // 2):
-                            T.barrier_all()
-                            T.mul(acc_o[h_i, :], acc_o[h_i, :], m_i_prev[h_i])
-                            T.barrier_all()
+                        # for h_i in range(block_M // 2):
+                        #     T.mul(acc_o[h_i, :], acc_o[h_i, :], m_i_prev[h_i])
+                        #     T.barrier_all()
 
                         T.copy(acc_s_ub, acc_s_half)
                         T.barrier_all()
@@ -205,6 +222,12 @@ def flash_attention_fwd(
                         T.set_cross_flag("MTE3", i + stages * 2)
 
                     for i in range(stages):
+                        for h_i in range(block_M // 2):
+                            if i == 0:
+                                T.mul(acc_o[h_i, :], acc_o[h_i, :], m_i_prev[h_i])
+                            else:
+                                T.mul(acc_o[h_i, :], acc_o[h_i, :], m_i_prev_1[h_i])
+                            T.barrier_all()
                         T.wait_cross_flag(i + stages * 5)
                         T.copy(
                             workspace_3[cid, i, vid * block_M // 2:vid * block_M // 2 + block_M // 2, :],
@@ -215,8 +238,10 @@ def flash_attention_fwd(
                         T.add(acc_o, acc_o, acc_o_ub)
                         T.barrier_all()
 
+                for i in range(stages):
+                    T.wait_cross_flag(i + stages * 3)
+
                 for h_i in range(block_M // 2):
-                    T.barrier_all()
                     T.div(acc_o[h_i, :], acc_o[h_i, :], sumexp[h_i])
                     T.barrier_all()
 
@@ -230,13 +255,10 @@ def flash_attention_fwd(
 
 
 func = flash_attention_fwd(
-    heads=1,
-    dim=512,
+    heads=H,
+    dim=D,
 )
 
-print(func.get_kernel_source())
-
-# exit(0)
 
 def ref_flash_attn(q, k, v):
     q = q.float()
@@ -248,8 +270,6 @@ def ref_flash_attn(q, k, v):
     o = torch.einsum("bhsk,bhkd->bhsd", acc, v)
     return o.to(torch.float16)
 
-
-B, S, H, D = 1, 128, 1, 512
 
 q = torch.randn((B, H, S, D), dtype=torch.float16)
 k = torch.randn((B, H, S, D), dtype=torch.float16)
@@ -267,6 +287,12 @@ print("init successful!")
 output = func(q, k, v, workspace_1, workspace_2, workspace_3)
 ref_output = ref_flash_attn(q, k, v)
 torch.npu.synchronize()
+
+from tilelang.profiler import do_bench
+
+tilelang_time = do_bench(lambda: func(q, k, v, workspace_1, workspace_2, workspace_3))
+print(tilelang_time)
+
 
 torch.testing.assert_close(ref_output, output, rtol=1e-2, atol=1e-2)
 

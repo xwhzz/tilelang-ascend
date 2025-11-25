@@ -7,6 +7,7 @@ torch.manual_seed(0)
 
 tilelang.disable_cache()
 
+B, S, H, D = 1, 4096, 1, 512
 
 @tilelang.jit(out_idx=[3],)
 def flash_attention_fwd(
@@ -15,8 +16,8 @@ def flash_attention_fwd(
 ):
     block_M, block_N = 64, 64
 
-    batch = 1
-    seq_len = 128
+    batch = B
+    seq_len = S
 
     dtype = "float16"
     accum_dtype = "float"
@@ -219,8 +220,8 @@ def flash_attention_fwd(
 
 
 func = flash_attention_fwd(
-    heads=1,
-    dim=512,
+    heads=H,
+    dim=D,
 )
 
 
@@ -234,8 +235,6 @@ def ref_flash_attn(q, k, v):
     o = torch.einsum("bhsk,bhkd->bhsd", acc, v)
     return o.to(torch.float16)
 
-
-B, S, H, D = 1, 128, 1, 512
 
 q = torch.randn((B, H, S, D), dtype=torch.float16)
 k = torch.randn((B, H, S, D), dtype=torch.float16)
@@ -253,6 +252,11 @@ print("init successful!")
 output = func(q, k, v, workspace_1, workspace_2, workspace_3)
 ref_output = ref_flash_attn(q, k, v)
 torch.npu.synchronize()
+
+from tilelang.profiler import do_bench
+
+tilelang_time = do_bench(lambda: func(q, k, v, workspace_1, workspace_2, workspace_3))
+print(tilelang_time)
 
 torch.testing.assert_close(ref_output, output, rtol=1e-2, atol=1e-2)
 
