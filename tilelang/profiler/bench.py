@@ -55,10 +55,19 @@ class suppress_stdout_stderr:
         self.errnull_file.close()
 
 
-IS_CUDA = torch.cuda.is_available()
-device = 'cuda:0' if IS_CUDA else 'mps:0'
-Event = torch.cuda.Event if IS_CUDA else torch.mps.Event
 
+if torch.cuda.is_available():
+    device = "cuda:0"
+    Event = torch.cuda.Event
+    synchronize = torch.cuda.synchronize
+elif torch.npu.is_available():
+    device = "npu:0"
+    Event = torch.npu.Event
+    synchronize = torch.npu.synchronize
+else:
+    device = "mps:0"
+    Event = torch.mps.Event
+    synchronize = torch.mps.synchronize
 
 def do_bench(
     fn: Callable,
@@ -98,7 +107,7 @@ def do_bench(
 
     # Initial function call and synchronization
     fn()
-    torch.cuda.synchronize()
+    synchronize()
 
     # Create L2 cache flush buffer (256 MB)
     # Fast flush uses int32 (4 bytes), regular uses int8 (1 byte)
@@ -107,8 +116,8 @@ def do_bench(
     cache = torch.empty(cache_size, dtype=cache_dtype, device="cuda")
 
     # Estimate kernel runtime with 5 iterations
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = Event(enable_timing=True)
+    end_event = Event(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
@@ -144,8 +153,8 @@ def _bench_with_cuda_events(
 ) -> float | list[float]:
     """Benchmark using CUDA events for timing."""
     # Create timing events
-    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
-    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    start_events = [Event(enable_timing=True) for _ in range(n_repeat)]
+    end_events = [Event(enable_timing=True) for _ in range(n_repeat)]
 
     # Run benchmark iterations
     for i in range(n_repeat):
@@ -155,7 +164,7 @@ def _bench_with_cuda_events(
         end_events[i].record()
 
     # Synchronize and collect timings
-    torch.cuda.synchronize()
+    synchronize()
     times = torch.tensor(
         [s.elapsed_time(e) for s, e in zip(start_events, end_events)],
         dtype=torch.float,
