@@ -5,7 +5,7 @@ from tilelang import tvm as tvm
 from tilelang import _ffi_api
 from tvm.target import Target
 from tvm.contrib import rocm
-from tilelang.contrib import nvcc
+from tilelang.contrib import nvcc, bisheng
 
 SUPPORTED_TARGETS: dict[str, str] = {
     "auto": "Auto-detect CUDA/HIP/Metal based on availability.",
@@ -58,6 +58,12 @@ def check_metal_availability() -> bool:
     # todo: check torch version?
     return arch == 'arm64'
 
+def check_ascend_availability() -> bool:
+    try:
+        bisheng.find_ascend_path()
+        return True
+    except Exception:
+        return False
 
 def determine_target(target: str | Target | Literal["auto"] = "auto",
                      return_object: bool = False) -> str | Target:
@@ -94,6 +100,8 @@ def determine_target(target: str | Target | Literal["auto"] = "auto",
             return_var = "hip"
         elif check_metal_availability():
             return_var = "metal"
+        elif check_ascend_availability():
+            return_var = "ascend"
         else:
             raise ValueError("No CUDA or HIP or MPS available on this system.")
     else:

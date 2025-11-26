@@ -164,6 +164,8 @@ if(NOT TILELANG_BACKEND_USER_SELECTED)
     set(USE_METAL ON)
   elseif($ENV{USE_ROCM})
     set(USE_ROCM ON)
+  elseif($ENV{USE_ASCEND})
+    set(USE_ASCEND ON)  
   else()
     if($ENV{USE_CUDA})
       set(USE_CUDA ON)
@@ -214,6 +216,12 @@ elseif(USE_CUDA)
   list(APPEND TILE_LANG_SRCS ${TILE_LANG_CUDA_SRCS})
 
   list(APPEND TILE_LANG_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
+elseif(USE_ASCEND)
+  file(GLOB TILE_LANG_ASCEND_SRCS
+    src/target/codegen_ascendc.cc
+    src/target/rt_mod_ascendc.cc
+  )
+  list(APPEND TILE_LANG_SRCS ${TILE_LANG_ASCEND_SRCS})
 endif()
 
 # Include tvm after configs have been populated

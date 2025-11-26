@@ -97,6 +97,14 @@ def _find_rocm_home() -> str:
     return rocm_home if rocm_home is not None else ""
 
 
+def _find_ascend_home() -> str:
+    bisheng_path = shutil.which("bisheng")
+    if bisheng_path is not None:
+        ascend_home = os.path.dirname(os.path.dirname(bisheng_path))
+    else:
+        ascend_home = None
+    return ascend_home if ascend_home is not None else ""
+
 # Cache control
 class CacheState:
     """Class to manage global kernel caching state."""
@@ -214,6 +222,7 @@ class Environment:
     # CUDA/ROCm home directories
     CUDA_HOME = _find_cuda_home()
     ROCM_HOME = _find_rocm_home()
+    ASCEND_HOME = _find_ascend_home()
 
     # Path to the TileLang package root
     TILELANG_PACKAGE_PATH = pathlib.Path(__file__).resolve().parent
@@ -294,6 +303,7 @@ env = Environment()
 # after initialization.
 CUDA_HOME = env.CUDA_HOME
 ROCM_HOME = env.ROCM_HOME
+ASCEND_HOME = env.ASCEND_HOME
 
 
 def prepend_pythonpath(path):

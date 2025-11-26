@@ -65,6 +65,8 @@ def dynamic_metadata(
             backend = 'rocm'
         elif 'USE_CUDA' in os.environ and not _read_cmake_bool(os.environ.get('USE_CUDA')):
             backend = 'cpu'
+        elif 'USE_ASCEND' in os.environ:
+            backend = 'ascend'
         else:  # cuda
             # Read nvcc version from env.
             # This is not exactly how it should be,
