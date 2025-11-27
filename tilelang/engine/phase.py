@@ -73,6 +73,9 @@ def PreLowerSemanticCheck(mod: IRModule) -> None:
     in Python side instead of letting the error dive into the complicated TVM/C++ stack.
     Note: This is a validation-only pipeline of passes and does not modify or return the module.
     """
+    tilelang.analysis.BufferClassifier()(mod)
+
+    exit(0)
 
     # Debug
     # tilelang.analysis.ASTPrinter()(mod)

@@ -18,6 +18,10 @@ bool TargetIsRocm(Target target) {
   return target->GetTargetDeviceType() == kDLROCM;
 }
 
+bool TargetIsAscend(Target target) {
+  return target->keys[0] == "ascend";
+}
+
 int GetArchInt(Target target) {
   auto s = target->GetAttr<tvm::ffi::String>("arch");
   ICHECK(s.has_value());
