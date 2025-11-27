@@ -3,7 +3,7 @@ from collections import defaultdict
 from tvm import tir
 from tvm.tir import (PyStmtExprVisitor, BufferStore, PrimFunc, BufferLoad, Call, For, Block, PyStmtExprMutator, Stmt, Buffer, decl_buffer)
 from tvm.tir.transform import prim_func_pass
-from tvm.tir.stmt_functor import post_order_visit
+from tvm.tir.stmt_functor import ir_transform
 
 
 @tir.functor.visitor
@@ -64,54 +64,38 @@ class _BufferClassifier(PyStmtExprVisitor):
         self.visit_stmt(op.body)
 
 
-@tir.functor.mutator
-class _BufferLegalizer(PyStmtExprMutator):
+class _BufferLegalizer:
     def __init__(self) -> None:
-        super().__init__()
         self.var_mem_map_ = None
     
     def insert(self, stmt) -> Stmt:
         classifier = _BufferClassifier()
         classifier.visit_stmt(stmt)
         self.var_mem_map_ = classifier.var_mem_map_
-        return self.visit_stmt(stmt)
-    
-    def visit_block_(self, op: Block) -> Stmt:
-        new_buffers = list(op.alloc_buffers)
-        if op.name_hint == "tilelang_root":
-            for bf in op.alloc_buffers:
-                for scope in self.var_mem_map_[bf]:
-                    new_bf = decl_buffer(bf.shape, bf.dtype, name=bf.name + "_" + scope, scope="shared." + scope)
-                    new_buffers.append(new_bf)
-            new_block = Block(
-                iter_vars=[],
-                reads=[],
-                writes=[],
-                name_hint=op.name_hint,
-                body=op.body,
-                alloc_buffers=new_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-            )
-            return new_block
-        else:
-            new_body = self.visit_stmt(op.body)
-            new_block = Block(
-                iter_vars=[],
-                reads=[],
-                writes=[],
-                name_hint=op.name_hint,
-                body=new_body,
-                alloc_buffers=op.alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-            )
-            return new_block
+
+        def preorder(op):
+            if isinstance(op, Block):
+                if op.name_hint == "tilelang_root":
+                    new_buffers = list(op.alloc_buffers)
+                    for bf in op.alloc_buffers:
+                        for scope in self.var_mem_map_[bf]:
+                            new_bf = decl_buffer(bf.shape, bf.dtype, name=bf.name + "_" + scope, scope="shared." + scope)
+                            new_buffers.append(new_bf)
+                    return Block(
+                        iter_vars=[],
+                        reads=[],
+                        writes=[],
+                        name_hint=op.name_hint,
+                        body=op.body,
+                        alloc_buffers=new_buffers,
+                        match_buffers=op.match_buffers,
+                        annotations=op.annotations,
+                    )
+        return ir_transform(stmt, preorder, None)
                 
 
 
 def BufferLegalizer():
-
     def pass_fn(func: PrimFunc, mod, ctx):
         legalizer = _BufferLegalizer()
         func = func.with_body(legalizer.insert(func.body))
