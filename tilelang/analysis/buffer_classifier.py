@@ -1,7 +1,7 @@
 from __future__ import annotations
 from functools import partial
 from tvm import tir
-from tvm.tir import (PyStmtExprVisitor, BufferStore, PrimFunc, BufferLoad, Call)
+from tvm.tir import (PyStmtExprVisitor, BufferStore, PrimFunc, BufferLoad, Call, For)
 from tvm.tir.transform import prim_func_pass
 from tvm.tir.stmt_functor import post_order_visit
 
@@ -47,9 +47,20 @@ class _BufferClassifier(PyStmtExprVisitor):
             collector.clear_buffer()
             collector.visit_expr(op.args[2])
             self.var_mem_map_["l0c"].update(collector.access_buffer)
+        elif op.op == tir.op.Op.get("tl.copy"):
+            return
         else:
             collector.visit_expr(op)
             self.var_mem_map_["ub"].update(collector.access_buffer)
+    
+    def visit_for_(self, op: For) -> None:
+        collector = self.collector
+        collector.clear_buffer()
+        if op.kind == tir.ForKind.PARALLEL:
+            collector.visit_stmt(op.body)
+            self.var_mem_map_["ub"].update(collector.access_buffer)
+            return
+        self.visit_stmt(op.body)
 
 def BufferClassifier():
 
